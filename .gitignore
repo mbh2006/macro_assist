@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment
+.env
+venv/
+.venv/
+
+# Generated indexes
+data/index/
+
+# Textbooks
+data/macro_textbooks/
+
+# Streamlit
+.streamlit/
+
+# OS files
+.DS_Store
+Thumbs.db

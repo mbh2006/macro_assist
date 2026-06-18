@@ -1,0 +1,16 @@
+streamlit
+python-dotenv
+numpy
+sympy
+torch
+transformer
+sentence-transformers
+chromadb
+rank-bm25
+google-generativeai
+requests
+beautifulsoup4
+duckduckgo-search
+pypdf
+nltk
+openai
