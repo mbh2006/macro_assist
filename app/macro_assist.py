@@ -738,7 +738,14 @@ def _call_text_llm(
             ),
         )
         response = model.generate_content(user_prompt)
-        return (getattr(response, "text", "") or "")
+        content = getattr(response.choices[0].message, "content", "") or ""
+
+        if not content.strip():
+            raise RuntimeError(
+                f"Empty model response. finish_reason={response.choices[0].finish_reason}"
+            )
+
+        return content
 
     if OpenAI is None:
         raise RuntimeError("openai package is not installed.")
@@ -767,7 +774,14 @@ def _call_text_llm(
             request_kwargs["max_tokens"] = max_output_tokens
 
         response = client.chat.completions.create(**request_kwargs)
-        return (getattr(response.choices[0].message, "content", "") or "")
+        content = getattr(response.choices[0].message, "content", "") or ""
+
+        if not content.strip():
+            raise RuntimeError(
+                f"Empty model response. finish_reason={response.choices[0].finish_reason}"
+            )
+
+        return content
     
     if provider_norm == "deepseek":
         if not DEEPSEEK_API_KEY:
@@ -776,14 +790,24 @@ def _call_text_llm(
             api_key=DEEPSEEK_API_KEY,
             base_url="https://api.deepseek.com",
         )
+        deepseek_max_tokens = max(max_output_tokens, 6000)
+
         response = client.chat.completions.create(
             model=model_name,
             messages=messages,
             temperature=temperature,
             top_p=top_p,
-            max_tokens=max_output_tokens,
+            max_tokens=deepseek_max_tokens,
         )
-        return (getattr(response.choices[0].message, "content", "") or "")
+        
+        content = getattr(response.choices[0].message, "content", "") or ""
+
+        if not content.strip():
+            raise RuntimeError(
+                f"Empty model response. finish_reason={response.choices[0].finish_reason}"
+            )
+
+        return content
 
     if provider_norm == "groq":
         if not GROQ_API_KEY:
@@ -799,7 +823,14 @@ def _call_text_llm(
             top_p=top_p,
             max_tokens=max_output_tokens,
         )
-        return (getattr(response.choices[0].message, "content", "") or "")
+        content = getattr(response.choices[0].message, "content", "") or ""
+
+        if not content.strip():
+            raise RuntimeError(
+                f"Empty model response. finish_reason={response.choices[0].finish_reason}"
+            )
+
+        return content
 
     raise ValueError(f"Unsupported provider: {provider}")
 
@@ -861,7 +892,7 @@ GROUNDING RULES
 
 - If evidence is insufficient, reply exactly:
 
-Sorry, I do not have enough information to answer that from the macroeconomics books or reliable fallback sources.
+Sorry, insufficient information to answer that from the macroeconomics books or reliable fallback sources.
 
 ========================================
 TEACHING STYLE
@@ -1878,6 +1909,8 @@ def generate_response_from_context(
             "optimized_query": optimized_query,
             "used_textbook_sources": used_textbook_sources,
             "used_web_sources": used_web_sources,
+            "answer_length": len(answer),
+            "answer_preview": answer[:200],
         }
         return (answer, meta) if return_metadata else answer
 
@@ -1911,6 +1944,8 @@ def generate_response_from_context(
             "error": str(exc),
             "used_textbook_sources": [],
             "used_web_sources": [],
+            "answer_length": len(fallback_answer),
+            "answer_preview": fallback_answer[:200],
         }
         return (fallback_answer, meta) if return_metadata else fallback_answer
 
@@ -2055,18 +2090,35 @@ def final_rag_pipeline(
         """.strip()
 
         try:
-            answer = (
-                _call_text_llm(
+            raw_answer =  _call_text_llm(
                     provider=generation_provider,
                     model_name=generation_model_name,
-                    system_prompt="You are a macroeconomics numerical problem solver.",
+                    system_prompt = """
+                    You are an expert macroeconomics numerical problem solver.
+
+                    This request has already been classified as a numerical economics problem.
+
+                    Do NOT require textbook evidence.
+
+                    Do NOT evaluate retrieval quality.
+
+                    Ignore missing retrieval context.
+
+                    If sufficient numerical information related to economics exists in the user question,
+                    solve the problem directly using only the provided values.
+
+                    Show all calculations step-by-step.
+
+                    Never respond that information is insufficient if the numerical data
+                    required for the calculation is present.
+                    """,
                     user_prompt=calc_prompt,
                     temperature=0.0,
                     top_p=0.95,
                     max_output_tokens=2000,
-                ).strip()
-                or NO_INFO_RESPONSE
-            )
+                )
+            
+            answer = raw_answer.strip() if raw_answer else ""
 
             meta = {
                 "status": "generated_for_calculation",
@@ -2080,23 +2132,34 @@ def final_rag_pipeline(
                 "used_textbook_sources": [],
                 "used_web_sources": [],
                 "used_web_fallback": False,
+                "provider": generation_provider,
+                "model_name": generation_model_name,
+                "answer_length": len(answer),
+                "answer_preview": answer[:200],
             }
 
             return (answer, meta) if return_metadata else answer
 
         except Exception as exc:
+
+            fallback_answer = (
+            "The numerical solver model is currently unavailable.\n\n"
+            f"Error: {str(exc)}\n\n"
+            "Try another provider or model."
+            )
+
             meta = {
                 "status": "calculation_error",
                 "intent": intent_signals.task,
                 "raw_query": raw_query,
                 "optimized_query": optimized_query,
                 "error": str(exc),
+                "answer_length": len(fallback_answer),
+                "answer_preview": fallback_answer[:200],
             }
 
-            return (NO_INFO_RESPONSE, meta) if return_metadata else NO_INFO_RESPONSE
+            return (fallback_answer, meta) if return_metadata else fallback_answer
     
-    
-
     use_web = False
     web_results: List[Dict[str, str]] = []
 
