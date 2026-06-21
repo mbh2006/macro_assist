@@ -3,7 +3,7 @@ python-dotenv
 numpy
 sympy
 torch
-transformer
+transformers
 sentence-transformers
 chromadb
 rank-bm25
